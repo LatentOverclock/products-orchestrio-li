@@ -28,6 +28,12 @@ type ProductInput = {
   status: ProductStatus
 }
 
+type RouteState =
+  | { kind: 'table' }
+  | { kind: 'kanban' }
+  | { kind: 'create' }
+  | { kind: 'product'; id: string }
+
 const statuses: Array<{ value: ProductStatus; label: string }> = [
   { value: 'mafo', label: 'mafo' },
   { value: 'write-manual', label: 'write-manual' },
@@ -94,9 +100,21 @@ mutation DeleteProduct($id: ID!) {
   deleteProduct(id: $id)
 }`
 
-function parseProductIdFromHash(hash: string): string | null {
-  const match = hash.match(/^#\/products\/(\d+)$/)
-  return match?.[1] ?? null
+function parseRoute(hash: string): RouteState {
+  if (hash === '#/kanban') {
+    return { kind: 'kanban' }
+  }
+
+  if (hash === '#/products/new') {
+    return { kind: 'create' }
+  }
+
+  const productMatch = hash.match(/^#\/products\/(\d+)$/)
+  if (productMatch) {
+    return { kind: 'product', id: productMatch[1] }
+  }
+
+  return { kind: 'table' }
 }
 
 function toGraphQLInput(input: ProductInput) {
@@ -206,13 +224,23 @@ function renderLink(label: string, href?: string | null) {
 }
 
 export function App() {
+  const [route, setRoute] = useState<RouteState>(() => parseRoute(window.location.hash))
   const [products, setProducts] = useState<Product[]>([])
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null)
   const [createInput, setCreateInput] = useState<ProductInput>(emptyInput)
   const [editInput, setEditInput] = useState<ProductInput>(emptyInput)
   const [error, setError] = useState('')
 
-  const selectedId = parseProductIdFromHash(window.location.hash)
+  const selectedId = route.kind === 'product' ? route.id : null
+
+  useEffect(() => {
+    const onHashChange = () => {
+      setRoute(parseRoute(window.location.hash))
+    }
+
+    window.addEventListener('hashchange', onHashChange)
+    return () => window.removeEventListener('hashchange', onHashChange)
+  }, [])
 
   const loadProducts = async () => {
     const data = await gql<{ products: Product[] }>(listQuery)
@@ -227,10 +255,12 @@ export function App() {
     }
   }
 
-  const refresh = async () => {
+  const refreshCurrentScreen = async () => {
     await loadProducts()
     if (selectedId) {
       await loadSelectedProduct(selectedId)
+    } else {
+      setSelectedProduct(null)
     }
   }
 
@@ -238,21 +268,14 @@ export function App() {
     const run = async () => {
       try {
         setError('')
-        await refresh()
+        await refreshCurrentScreen()
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err))
       }
     }
 
     run()
-
-    const onHashChange = () => {
-      run()
-    }
-
-    window.addEventListener('hashchange', onHashChange)
-    return () => window.removeEventListener('hashchange', onHashChange)
-  }, [selectedId])
+  }, [route.kind, selectedId])
 
   const groupedProducts = useMemo(() => {
     const grouped: Record<ProductStatus, Product[]> = {
@@ -266,20 +289,27 @@ export function App() {
     return grouped
   }, [products])
 
-  const goToList = () => {
-    window.location.hash = '#/'
+  const navigate = (hash: string) => {
+    if (window.location.hash === hash) {
+      setRoute(parseRoute(hash))
+      return
+    }
+    window.location.hash = hash
   }
 
-  const goToDetail = (id: string) => {
-    window.location.hash = `#/products/${id}`
-  }
+  const goToTable = () => navigate('#/table')
+  const goToKanban = () => navigate('#/kanban')
+  const goToCreate = () => navigate('#/products/new')
+  const goToProduct = (id: string) => navigate(`#/products/${id}`)
 
   const createProduct = async () => {
     try {
       setError('')
-      await gql(createMutation, { input: toGraphQLInput(createInput) })
+      const data = await gql<{ createProduct: { id: string } }>(createMutation, {
+        input: toGraphQLInput(createInput),
+      })
       setCreateInput(emptyInput)
-      await refresh()
+      goToProduct(data.createProduct.id)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     }
@@ -290,7 +320,7 @@ export function App() {
     try {
       setError('')
       await gql(updateMutation, { id: selectedId, input: toGraphQLInput(editInput) })
-      await refresh()
+      await refreshCurrentScreen()
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     }
@@ -301,9 +331,10 @@ export function App() {
       setError('')
       await gql(deleteMutation, { id })
       if (selectedId === id) {
-        goToList()
+        goToTable()
+        return
       }
-      await refresh()
+      await refreshCurrentScreen()
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     }
@@ -316,89 +347,100 @@ export function App() {
           <h1>Products Manager</h1>
           <p>Manage products, workflow status, and documentation links.</p>
         </div>
-        {selectedId ? (
-          <button className="btn-secondary" onClick={goToList}>
-            Back to list
-          </button>
-        ) : null}
       </header>
+
+      <nav className="view-switch">
+        <button className={`btn-secondary ${route.kind === 'table' ? 'is-active' : ''}`} onClick={goToTable}>
+          Table view
+        </button>
+        <button className={`btn-secondary ${route.kind === 'kanban' ? 'is-active' : ''}`} onClick={goToKanban}>
+          Kanban view
+        </button>
+        <button className={`btn-secondary ${route.kind === 'create' ? 'is-active' : ''}`} onClick={goToCreate}>
+          Create / edit page
+        </button>
+      </nav>
 
       {error ? <p className="error">{error}</p> : null}
 
-      {!selectedId ? (
-        <>
-          <ProductForm
-            title="Create product"
-            submitLabel="Create product"
-            value={createInput}
-            onChange={setCreateInput}
-            onSubmit={createProduct}
-          />
-
-          <section className="card">
-            <h2>Products by status (kanban)</h2>
-            <div className="kanban-grid">
-              {statuses.map((status) => (
-                <article key={status.value} className="kanban-column">
-                  <h3>{status.label}</h3>
-                  <ul>
-                    {groupedProducts[status.value].map((product) => (
-                      <li key={product.id}>
-                        <button className="link-button" onClick={() => goToDetail(product.id)}>
-                          {product.name}
-                        </button>
-                      </li>
-                    ))}
-                    {groupedProducts[status.value].length === 0 ? <li className="muted">No products</li> : null}
-                  </ul>
-                </article>
-              ))}
-            </div>
-          </section>
-
-          <section className="card">
-            <h2>Products table</h2>
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>Name</th>
-                  <th>Status</th>
-                  <th>Description</th>
-                  <th>Actions</th>
+      {route.kind === 'table' ? (
+        <section className="card">
+          <h2>Products table</h2>
+          <table className="table">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Status</th>
+                <th>Description</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {products.map((product) => (
+                <tr key={product.id}>
+                  <td>
+                    <button className="link-button" onClick={() => goToProduct(product.id)}>
+                      {product.name}
+                    </button>
+                  </td>
+                  <td>{product.status}</td>
+                  <td>{product.description || '—'}</td>
+                  <td className="actions">
+                    <button className="btn-secondary" onClick={() => goToProduct(product.id)}>
+                      Open
+                    </button>
+                    <button className="btn-danger" onClick={() => deleteProduct(product.id)}>
+                      Delete
+                    </button>
+                  </td>
                 </tr>
-              </thead>
-              <tbody>
-                {products.map((product) => (
-                  <tr key={product.id}>
-                    <td>
-                      <button className="link-button" onClick={() => goToDetail(product.id)}>
+              ))}
+              {products.length === 0 ? (
+                <tr>
+                  <td colSpan={4} className="muted">
+                    No products yet.
+                  </td>
+                </tr>
+              ) : null}
+            </tbody>
+          </table>
+        </section>
+      ) : null}
+
+      {route.kind === 'kanban' ? (
+        <section className="card">
+          <h2>Products by status (kanban)</h2>
+          <div className="kanban-grid">
+            {statuses.map((status) => (
+              <article key={status.value} className="kanban-column">
+                <h3>{status.label}</h3>
+                <ul>
+                  {groupedProducts[status.value].map((product) => (
+                    <li key={product.id}>
+                      <button className="link-button" onClick={() => goToProduct(product.id)}>
                         {product.name}
                       </button>
-                    </td>
-                    <td>{product.status}</td>
-                    <td>{product.description || '—'}</td>
-                    <td className="actions">
-                      <button className="btn-secondary" onClick={() => goToDetail(product.id)}>
-                        View
-                      </button>
-                      <button className="btn-danger" onClick={() => deleteProduct(product.id)}>
-                        Delete
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-                {products.length === 0 ? (
-                  <tr>
-                    <td colSpan={4} className="muted">
-                      No products yet.
-                    </td>
-                  </tr>
-                ) : null}
-              </tbody>
-            </table>
-          </section>
-        </>
-      ) : (
+                    </li>
+                  ))}
+                  {groupedProducts[status.value].length === 0 ? <li className="muted">No products</li> : null}
+                </ul>
+              </article>
+            ))}
+          </div>
+        </section>
+      ) : null}
+
+      {route.kind === 'create' ? (
+        <ProductForm
+          title="Create / edit page"
+          submitLabel="Create product"
+          value={createInput}
+          onChange={setCreateInput}
+          onSubmit={createProduct}
+        />
+      ) : null}
+
+      {route.kind === 'product' ? (
         <>
           <section className="card">
             <h2>Product details</h2>
@@ -445,7 +487,7 @@ export function App() {
 
           {selectedProduct ? (
             <ProductForm
-              title="Edit product"
+              title="Create / edit page"
               submitLabel="Save changes"
               value={editInput}
               onChange={setEditInput}
@@ -453,7 +495,7 @@ export function App() {
             />
           ) : null}
         </>
-      )}
+      ) : null}
     </main>
   )
 }

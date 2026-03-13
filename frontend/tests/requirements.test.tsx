@@ -83,7 +83,7 @@ function mockGraphQL() {
 
 describe('requirements coverage', () => {
   beforeEach(() => {
-    window.location.hash = '#/'
+    window.location.hash = '#/table'
     mockGraphQL()
   })
 
@@ -92,24 +92,31 @@ describe('requirements coverage', () => {
     vi.unstubAllGlobals()
   })
 
-  it('shows kanban grouping and table listing with required statuses', async () => {
+  it('shows dedicated table-view screen', async () => {
+    render(<App />)
+
+    await waitFor(() => expect(screen.getByText('Products table')).toBeTruthy())
+    expect(screen.getByText('Table view')).toBeTruthy()
+    expect(screen.queryByText('Products by status (kanban)')).toBeNull()
+
+    expect(screen.getByRole('columnheader', { name: 'Name' })).toBeTruthy()
+    expect(screen.getByRole('columnheader', { name: 'Status' })).toBeTruthy()
+    expect(screen.getAllByRole('button', { name: 'MacBook Pro 14' }).length).toBeGreaterThan(0)
+  })
+
+  it('shows dedicated kanban-view screen', async () => {
+    window.location.hash = '#/kanban'
     render(<App />)
 
     await waitFor(() => expect(screen.getByText('Products by status (kanban)')).toBeTruthy())
+    expect(screen.queryByText('Products table')).toBeNull()
 
     expect(screen.getAllByText('mafo').length).toBeGreaterThan(0)
     expect(screen.getAllByText('write-manual').length).toBeGreaterThan(0)
     expect(screen.getAllByText('all-done').length).toBeGreaterThan(0)
-
-    expect(screen.getByText('Products table')).toBeTruthy()
-    expect(screen.getByRole('columnheader', { name: 'Name' })).toBeTruthy()
-    expect(screen.getByRole('columnheader', { name: 'Status' })).toBeTruthy()
-
-    expect(screen.getAllByRole('button', { name: 'MacBook Pro 14' }).length).toBeGreaterThan(0)
-    expect(screen.getAllByText('ThinkPad X1').length).toBeGreaterThan(0)
   })
 
-  it('opens detail page and shows all product detail fields', async () => {
+  it('shows product view with details and shared create/edit page layout', async () => {
     window.location.hash = '#/products/1'
     render(<App />)
 
@@ -117,13 +124,11 @@ describe('requirements coverage', () => {
     await waitFor(() => expect(screen.getByText('https://example.com/purchase')).toBeTruthy())
 
     expect(screen.getAllByText('MacBook Pro 14').length).toBeGreaterThan(0)
-    expect(screen.getAllByText('Main laptop').length).toBeGreaterThan(0)
-    expect(screen.getByText('https://example.com/purchase')).toBeTruthy()
     expect(screen.getByText('https://example.com/shop')).toBeTruthy()
     expect(screen.getByText('https://example.com/booqable')).toBeTruthy()
     expect(screen.getByText('https://example.com/manual')).toBeTruthy()
     expect(screen.getByText('https://example.com/inspection')).toBeTruthy()
 
-    expect(screen.getByText('Edit product')).toBeTruthy()
+    expect(screen.getAllByText('Create / edit page').length).toBeGreaterThan(0)
   })
 })

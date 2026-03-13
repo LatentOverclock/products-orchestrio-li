@@ -23,7 +23,14 @@ body {
   justify-content: space-between;
   gap: 12px;
   align-items: flex-start;
-  margin-bottom: 16px;
+  margin-bottom: 10px;
+}
+
+.view-switch {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 8px;
 }
 
 .card {
@@ -83,6 +90,11 @@ button {
 .btn-secondary {
   background: #e2e8f0;
   color: #0f172a;
+}
+
+.btn-secondary.is-active {
+  background: #1d4ed8;
+  color: #fff;
 }
 
 .btn-danger {
