@@ -146,19 +146,22 @@ describe('requirements coverage', () => {
     expect(screen.getAllByText('all-done').length).toBeGreaterThan(0)
   })
 
-  it('shows product view with details and shared create/edit page layout', async () => {
+  it('shows unified view/edit page without duplicated detail fields', async () => {
     window.location.hash = '#/products/1'
     render(<App />)
 
-    await waitFor(() => expect(screen.getByText('Product details')).toBeTruthy())
-    await waitFor(() => expect(screen.getByText('https://example.com/purchase')).toBeTruthy())
+    await waitFor(() => expect(screen.getByText('View / edit page')).toBeTruthy())
 
-    expect(screen.getAllByText('MacBook Pro 14').length).toBeGreaterThan(0)
-    expect(screen.getByText('https://example.com/shop')).toBeTruthy()
-    expect(screen.getByText('https://example.com/booqable')).toBeTruthy()
-    expect(screen.getByText('https://example.com/manual')).toBeTruthy()
-    expect(screen.getByText('https://example.com/inspection')).toBeTruthy()
+    expect((screen.getByLabelText('Name') as HTMLInputElement).value).toBe('MacBook Pro 14')
+    expect((screen.getByLabelText('Purchase link') as HTMLInputElement).value).toBe('https://example.com/purchase')
+    expect((screen.getByLabelText('Shop link') as HTMLInputElement).value).toBe('https://example.com/shop')
+    expect((screen.getByLabelText('Booqable link') as HTMLInputElement).value).toBe('https://example.com/booqable')
+    expect((screen.getByLabelText('Manual link') as HTMLInputElement).value).toBe('https://example.com/manual')
+    expect((screen.getByLabelText('Inspection link') as HTMLInputElement).value).toBe('https://example.com/inspection')
+    expect((screen.getByLabelText('Description') as HTMLTextAreaElement).value).toBe('Main laptop')
+    expect((screen.getByLabelText('Status') as HTMLSelectElement).value).toBe('mafo')
 
-    expect(screen.getAllByText('Create / edit page').length).toBeGreaterThan(0)
+    expect(screen.queryByText('Product details')).toBeNull()
+    expect(screen.getByText('Product metadata')).toBeTruthy()
   })
 })

@@ -257,23 +257,6 @@ function ProductForm(props: {
   )
 }
 
-function renderLink(label: string, href?: string | null) {
-  return (
-    <tr>
-      <th>{label}</th>
-      <td>
-        {href ? (
-          <a href={href} target="_blank" rel="noreferrer">
-            {href}
-          </a>
-        ) : (
-          '—'
-        )}
-      </td>
-    </tr>
-  )
-}
-
 function renderTableLink(href?: string | null) {
   if (!href) {
     return <span className="muted">—</span>
@@ -624,29 +607,24 @@ export function App() {
       ) : null}
 
       {route.kind === 'product' ? (
-        <>
-          <section className="card">
-            <h2>Product details</h2>
-            {selectedProduct ? (
+        selectedProduct ? (
+          <>
+            <ProductForm
+              title="View / edit page"
+              submitLabel="Save changes"
+              value={editInput}
+              onChange={setEditInput}
+              onSubmit={updateProduct}
+            />
+
+            <section className="card">
+              <h2>Product metadata</h2>
               <table className="detail-table">
                 <tbody>
                   <tr>
-                    <th>Name</th>
-                    <td>{selectedProduct.name}</td>
+                    <th>ID</th>
+                    <td>{selectedProduct.id}</td>
                   </tr>
-                  <tr>
-                    <th>Status</th>
-                    <td>{selectedProduct.status}</td>
-                  </tr>
-                  <tr>
-                    <th>Description</th>
-                    <td>{selectedProduct.description || '—'}</td>
-                  </tr>
-                  {renderLink('Purchase link', selectedProduct.purchaseLink)}
-                  {renderLink('Shop link', selectedProduct.shopLink)}
-                  {renderLink('Booqable link', selectedProduct.booqableLink)}
-                  {renderLink('Manual link', selectedProduct.manualLink)}
-                  {renderLink('Inspection link', selectedProduct.inspectionLink)}
                   <tr>
                     <th>Created</th>
                     <td>{new Date(selectedProduct.createdAt).toLocaleString()}</td>
@@ -657,27 +635,18 @@ export function App() {
                   </tr>
                 </tbody>
               </table>
-            ) : (
-              <p className="muted">Product not found.</p>
-            )}
 
-            {selectedProduct ? (
               <button className="btn-danger" onClick={() => deleteProduct(selectedProduct.id)}>
                 Delete product
               </button>
-            ) : null}
+            </section>
+          </>
+        ) : (
+          <section className="card">
+            <h2>View / edit page</h2>
+            <p className="muted">Product not found.</p>
           </section>
-
-          {selectedProduct ? (
-            <ProductForm
-              title="Create / edit page"
-              submitLabel="Save changes"
-              value={editInput}
-              onChange={setEditInput}
-              onSubmit={updateProduct}
-            />
-          ) : null}
-        </>
+        )
       ) : null}
     </main>
   )
