@@ -2,11 +2,14 @@ package store
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"time"
 
 	"products-orchestio-li/backend/internal/model"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -44,6 +47,14 @@ func (s *PostgresStore) migrate(ctx context.Context) error {
 		CONSTRAINT products_status_check CHECK (status IN ('mafo','write-manual','all-done'))
 	);
 	CREATE INDEX IF NOT EXISTS products_status_idx ON products(status);
+
+	CREATE TABLE IF NOT EXISTS users (
+		id BIGSERIAL PRIMARY KEY,
+		email TEXT NOT NULL UNIQUE,
+		password_hash TEXT NOT NULL,
+		created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+		updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+	);
 	`)
 	return err
 }
@@ -76,6 +87,24 @@ func scanProduct(row pgx.Row) (*model.Product, error) {
 		return nil, err
 	}
 	return &p, nil
+}
+
+func scanUser(row pgx.Row) (*model.User, error) {
+	var u model.User
+	err := row.Scan(
+		&u.ID,
+		&u.Email,
+		&u.PasswordHash,
+		&u.CreatedAt,
+		&u.UpdatedAt,
+	)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	return &u, nil
 }
 
 func (s *PostgresStore) ListProducts(ctx context.Context) ([]model.Product, error) {
@@ -172,6 +201,150 @@ func (s *PostgresStore) DeleteProduct(ctx context.Context, id int64) (bool, erro
 		return false, err
 	}
 	return result.RowsAffected() > 0, nil
+}
+
+func (s *PostgresStore) ListUsers(ctx context.Context) ([]model.User, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT id, email, password_hash, created_at, updated_at
+		FROM users
+		ORDER BY id ASC
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	users := []model.User{}
+	for rows.Next() {
+		var u model.User
+		if err := rows.Scan(&u.ID, &u.Email, &u.PasswordHash, &u.CreatedAt, &u.UpdatedAt); err != nil {
+			return nil, err
+		}
+		users = append(users, u)
+	}
+	return users, rows.Err()
+}
+
+func (s *PostgresStore) GetUser(ctx context.Context, id int64) (*model.User, error) {
+	return scanUser(s.pool.QueryRow(ctx, `
+		SELECT id, email, password_hash, created_at, updated_at
+		FROM users
+		WHERE id = $1
+	`, id))
+}
+
+func (s *PostgresStore) CreateUser(ctx context.Context, input model.CreateUserInput) (*model.User, error) {
+	email := normalizeEmail(input.Email)
+	password := strings.TrimSpace(input.Password)
+	if email == "" || password == "" {
+		return nil, ErrInvalidCredentials
+	}
+
+	hash, err := hashPassword(password)
+	if err != nil {
+		return nil, err
+	}
+
+	user, err := scanUser(s.pool.QueryRow(ctx, `
+		INSERT INTO users (email, password_hash)
+		VALUES ($1, $2)
+		RETURNING id, email, password_hash, created_at, updated_at
+	`, email, hash))
+	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			return nil, ErrEmailAlreadyExists
+		}
+		return nil, err
+	}
+	return user, nil
+}
+
+func (s *PostgresStore) UpdateUser(ctx context.Context, id int64, input model.UpdateUserInput) (*model.User, error) {
+	current, err := s.GetUser(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+
+	nextEmail := current.Email
+	if input.Email != nil {
+		normalized := normalizeEmail(*input.Email)
+		if normalized == "" {
+			return nil, ErrInvalidCredentials
+		}
+		nextEmail = normalized
+	}
+
+	nextHash := current.PasswordHash
+	if input.Password != nil {
+		password := strings.TrimSpace(*input.Password)
+		if password != "" {
+			hash, err := hashPassword(password)
+			if err != nil {
+				return nil, err
+			}
+			nextHash = hash
+		}
+	}
+
+	user, err := scanUser(s.pool.QueryRow(ctx, `
+		UPDATE users
+		SET email = $2,
+			password_hash = $3,
+			updated_at = NOW()
+		WHERE id = $1
+		RETURNING id, email, password_hash, created_at, updated_at
+	`, id, nextEmail, nextHash))
+	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			return nil, ErrEmailAlreadyExists
+		}
+		return nil, err
+	}
+	return user, nil
+}
+
+func (s *PostgresStore) DeleteUser(ctx context.Context, id int64) (bool, error) {
+	result, err := s.pool.Exec(ctx, `DELETE FROM users WHERE id = $1`, id)
+	if err != nil {
+		return false, err
+	}
+	return result.RowsAffected() > 0, nil
+}
+
+func (s *PostgresStore) AuthenticateUser(ctx context.Context, email, password string) (*model.User, error) {
+	user, err := scanUser(s.pool.QueryRow(ctx, `
+		SELECT id, email, password_hash, created_at, updated_at
+		FROM users
+		WHERE email = $1
+	`, normalizeEmail(email)))
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return nil, ErrInvalidCredentials
+		}
+		return nil, err
+	}
+
+	if !verifyPassword(user.PasswordHash, password) {
+		return nil, ErrInvalidCredentials
+	}
+	return user, nil
+}
+
+func (s *PostgresStore) EnsureUser(ctx context.Context, input model.CreateUserInput) (*model.User, error) {
+	existing, err := scanUser(s.pool.QueryRow(ctx, `
+		SELECT id, email, password_hash, created_at, updated_at
+		FROM users
+		WHERE email = $1
+	`, normalizeEmail(input.Email)))
+	if err == nil {
+		return existing, nil
+	}
+	if !errors.Is(err, ErrNotFound) {
+		return nil, err
+	}
+	return s.CreateUser(ctx, input)
 }
 
 func (s *PostgresStore) Close() {

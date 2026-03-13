@@ -18,6 +18,9 @@ services:
     environment:
       DATABASE_URL: postgres://products:products@db:5432/products?sslmode=disable
       PORT: 8080
+      AUTH_JWT_SECRET: ${AUTH_JWT_SECRET}
+      AUTH_ADMIN_EMAIL: ${AUTH_ADMIN_EMAIL}
+      AUTH_ADMIN_PASSWORD: ${AUTH_ADMIN_PASSWORD}
     depends_on:
       db:
         condition: service_healthy

@@ -8,18 +8,24 @@ import (
 	"time"
 
 	"products-orchestio-li/backend/internal/app"
+	"products-orchestio-li/backend/internal/model"
 	"products-orchestio-li/backend/internal/store"
 )
 
+func envOrDefault(key, fallback string) string {
+	value := os.Getenv(key)
+	if value == "" {
+		return fallback
+	}
+	return value
+}
+
 func main() {
-	databaseURL := os.Getenv("DATABASE_URL")
-	if databaseURL == "" {
-		databaseURL = "postgres://products:products@localhost:5432/products?sslmode=disable"
-	}
-	port := os.Getenv("PORT")
-	if port == "" {
-		port = "8080"
-	}
+	databaseURL := envOrDefault("DATABASE_URL", "postgres://products:products@localhost:5432/products?sslmode=disable")
+	port := envOrDefault("PORT", "8080")
+	jwtSecret := envOrDefault("AUTH_JWT_SECRET", "change-me-in-env")
+	adminEmail := envOrDefault("AUTH_ADMIN_EMAIL", "admin@products.local")
+	adminPassword := envOrDefault("AUTH_ADMIN_PASSWORD", "admin123")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -30,7 +36,11 @@ func main() {
 	}
 	defer s.Close()
 
-	a, err := app.New(s)
+	if _, err := s.EnsureUser(ctx, model.CreateUserInput{Email: adminEmail, Password: adminPassword}); err != nil {
+		log.Fatalf("bootstrap admin user failed: %v", err)
+	}
+
+	a, err := app.New(s, jwtSecret)
 	if err != nil {
 		log.Fatalf("app init failed: %v", err)
 	}

@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from 'react'
-import { gql } from './api'
+import { FormEvent, useEffect, useMemo, useState } from 'react'
+import { clearAuthToken, getAuthToken, gql, setAuthToken } from './api'
 
 type ProductStatus = 'mafo' | 'write-manual' | 'all-done'
 
@@ -28,10 +28,23 @@ type ProductInput = {
   status: ProductStatus
 }
 
+type User = {
+  id: string
+  email: string
+  createdAt: string
+  updatedAt: string
+}
+
+type UserDraft = {
+  email: string
+  password: string
+}
+
 type RouteState =
   | { kind: 'table' }
   | { kind: 'kanban' }
   | { kind: 'create' }
+  | { kind: 'users' }
   | { kind: 'product'; id: string }
 
 type TablePropertyKey =
@@ -92,7 +105,7 @@ const emptyInput: ProductInput = {
   status: 'mafo',
 }
 
-const listQuery = `
+const listProductsQuery = `
 query ListProducts {
   products {
     id
@@ -109,7 +122,7 @@ query ListProducts {
   }
 }`
 
-const detailQuery = `
+const productByIdQuery = `
 query ProductById($id: ID!) {
   product(id: $id) {
     id
@@ -126,19 +139,43 @@ query ProductById($id: ID!) {
   }
 }`
 
-const createMutation = `
+const createProductMutation = `
 mutation CreateProduct($input: ProductInput!) {
   createProduct(input: $input) { id }
 }`
 
-const updateMutation = `
+const updateProductMutation = `
 mutation UpdateProduct($id: ID!, $input: ProductInput!) {
   updateProduct(id: $id, input: $input) { id }
 }`
 
-const deleteMutation = `
+const deleteProductMutation = `
 mutation DeleteProduct($id: ID!) {
   deleteProduct(id: $id)
+}`
+
+const listUsersQuery = `
+query ListUsers {
+  users {
+    id
+    email
+    createdAt
+    updatedAt
+  }
+}`
+
+const updateUserMutation = `
+mutation UpdateUser($id: ID!, $input: UpdateUserInput!) {
+  updateUser(id: $id, input: $input) {
+    id
+    email
+    updatedAt
+  }
+}`
+
+const deleteUserMutation = `
+mutation DeleteUser($id: ID!) {
+  deleteUser(id: $id)
 }`
 
 function parseRoute(hash: string): RouteState {
@@ -148,6 +185,10 @@ function parseRoute(hash: string): RouteState {
 
   if (hash === '#/products/new') {
     return { kind: 'create' }
+  }
+
+  if (hash === '#/users') {
+    return { kind: 'users' }
   }
 
   const productMatch = hash.match(/^#\/products\/(\d+)$/)
@@ -269,18 +310,57 @@ function renderTableLink(href?: string | null) {
   )
 }
 
+function isUnauthorizedError(message: string): boolean {
+  return message.toLowerCase().includes('unauthorized') || message.toLowerCase().includes('invalid token')
+}
+
 export function App() {
   const [route, setRoute] = useState<RouteState>(() => parseRoute(window.location.hash))
+  const [authTokenState, setAuthTokenState] = useState<string | null>(() => getAuthToken())
+  const [currentUserEmail, setCurrentUserEmail] = useState('')
+
+  const [loginEmail, setLoginEmail] = useState('admin@products.local')
+  const [loginPassword, setLoginPassword] = useState('admin123')
+  const [loginError, setLoginError] = useState('')
+  const [isLoggingIn, setIsLoggingIn] = useState(false)
+
   const [products, setProducts] = useState<Product[]>([])
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null)
   const [createInput, setCreateInput] = useState<ProductInput>(emptyInput)
   const [editInput, setEditInput] = useState<ProductInput>(emptyInput)
   const [error, setError] = useState('')
+
+  const [users, setUsers] = useState<User[]>([])
+  const [userDrafts, setUserDrafts] = useState<Record<string, UserDraft>>({})
+  const [usersError, setUsersError] = useState('')
+
   const [tableFilters, setTableFilters] = useState<Record<TablePropertyKey, string>>(initialTableFilters)
   const [tableSortKey, setTableSortKey] = useState<TablePropertyKey>('name')
   const [tableSortDirection, setTableSortDirection] = useState<SortDirection>('asc')
 
   const selectedId = route.kind === 'product' ? route.id : null
+
+  const logout = (reason?: string) => {
+    clearAuthToken()
+    setAuthTokenState(null)
+    setCurrentUserEmail('')
+    setProducts([])
+    setSelectedProduct(null)
+    setUsers([])
+    setUserDrafts({})
+    if (reason) {
+      setLoginError(reason)
+    }
+  }
+
+  const handleOperationalError = (err: unknown, setTargetError: (message: string) => void) => {
+    const message = err instanceof Error ? err.message : String(err)
+    if (isUnauthorizedError(message)) {
+      logout('Session expired. Please login again.')
+      return
+    }
+    setTargetError(message)
+  }
 
   useEffect(() => {
     const onHashChange = () => {
@@ -292,39 +372,62 @@ export function App() {
   }, [])
 
   const loadProducts = async () => {
-    const data = await gql<{ products: Product[] }>(listQuery)
+    const data = await gql<{ products: Product[] }>(listProductsQuery)
     setProducts(data.products)
   }
 
   const loadSelectedProduct = async (id: string) => {
-    const data = await gql<{ product: Product | null }>(detailQuery, { id })
+    const data = await gql<{ product: Product | null }>(productByIdQuery, { id })
     setSelectedProduct(data.product)
     if (data.product) {
       setEditInput(fromProduct(data.product))
     }
   }
 
-  const refreshCurrentScreen = async () => {
-    await loadProducts()
-    if (selectedId) {
-      await loadSelectedProduct(selectedId)
-    } else {
-      setSelectedProduct(null)
-    }
+  const loadUsers = async () => {
+    const data = await gql<{ users: User[] }>(listUsersQuery)
+    setUsers(data.users)
+    setUserDrafts((previous) => {
+      const next: Record<string, UserDraft> = {}
+      for (const user of data.users) {
+        next[user.id] = {
+          email: previous[user.id]?.email ?? user.email,
+          password: '',
+        }
+      }
+      return next
+    })
   }
 
   useEffect(() => {
+    if (!authTokenState) {
+      return
+    }
+
     const run = async () => {
       try {
         setError('')
-        await refreshCurrentScreen()
+        setUsersError('')
+
+        if (route.kind === 'users') {
+          await loadUsers()
+          return
+        }
+
+        await loadProducts()
+
+        if (selectedId) {
+          await loadSelectedProduct(selectedId)
+        } else {
+          setSelectedProduct(null)
+        }
       } catch (err) {
-        setError(err instanceof Error ? err.message : String(err))
+        handleOperationalError(err, route.kind === 'users' ? setUsersError : setError)
       }
     }
 
     run()
-  }, [route.kind, selectedId])
+  }, [authTokenState, route.kind, selectedId])
 
   const groupedProducts = useMemo(() => {
     const grouped: Record<ProductStatus, Product[]> = {
@@ -372,6 +475,7 @@ export function App() {
   const goToKanban = () => navigate('#/kanban')
   const goToCreate = () => navigate('#/products/new')
   const goToProduct = (id: string) => navigate(`#/products/${id}`)
+  const goToUsers = () => navigate('#/users')
 
   const setTableFilter = (key: TablePropertyKey, value: string) => {
     setTableFilters((current) => ({ ...current, [key]: value }))
@@ -397,13 +501,13 @@ export function App() {
   const createProduct = async () => {
     try {
       setError('')
-      const data = await gql<{ createProduct: { id: string } }>(createMutation, {
+      const data = await gql<{ createProduct: { id: string } }>(createProductMutation, {
         input: toGraphQLInput(createInput),
       })
       setCreateInput(emptyInput)
       goToProduct(data.createProduct.id)
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
+      handleOperationalError(err, setError)
     }
   }
 
@@ -411,25 +515,132 @@ export function App() {
     if (!selectedId) return
     try {
       setError('')
-      await gql(updateMutation, { id: selectedId, input: toGraphQLInput(editInput) })
-      await refreshCurrentScreen()
+      await gql(updateProductMutation, { id: selectedId, input: toGraphQLInput(editInput) })
+      await loadProducts()
+      await loadSelectedProduct(selectedId)
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
+      handleOperationalError(err, setError)
     }
   }
 
   const deleteProduct = async (id: string) => {
     try {
       setError('')
-      await gql(deleteMutation, { id })
+      await gql(deleteProductMutation, { id })
       if (selectedId === id) {
         goToTable()
         return
       }
-      await refreshCurrentScreen()
+      await loadProducts()
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
+      handleOperationalError(err, setError)
     }
+  }
+
+  const setUserDraftField = (id: string, field: keyof UserDraft, value: string) => {
+    setUserDrafts((current) => ({
+      ...current,
+      [id]: {
+        email: current[id]?.email ?? '',
+        password: current[id]?.password ?? '',
+        [field]: value,
+      },
+    }))
+  }
+
+  const saveUser = async (id: string) => {
+    const draft = userDrafts[id]
+    if (!draft) {
+      return
+    }
+
+    const input: Record<string, string> = {
+      email: draft.email,
+    }
+    if (draft.password.trim() !== '') {
+      input.password = draft.password
+    }
+
+    try {
+      setUsersError('')
+      await gql(updateUserMutation, { id, input })
+      await loadUsers()
+    } catch (err) {
+      handleOperationalError(err, setUsersError)
+    }
+  }
+
+  const removeUser = async (id: string) => {
+    try {
+      setUsersError('')
+      await gql(deleteUserMutation, { id })
+      await loadUsers()
+    } catch (err) {
+      handleOperationalError(err, setUsersError)
+    }
+  }
+
+  const handleLogin = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+
+    try {
+      setIsLoggingIn(true)
+      setLoginError('')
+
+      const response = await fetch('/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: loginEmail, password: loginPassword }),
+      })
+
+      const payload = (await response.json()) as {
+        token?: string
+        user?: { email?: string }
+        errors?: Array<{ message: string }>
+      }
+
+      if (!response.ok || !payload.token) {
+        if (payload.errors?.[0]?.message) {
+          throw new Error(payload.errors[0].message)
+        }
+        throw new Error('Login failed')
+      }
+
+      setAuthToken(payload.token)
+      setAuthTokenState(payload.token)
+      setCurrentUserEmail(payload.user?.email ?? '')
+      setLoginPassword('')
+      navigate('#/table')
+    } catch (err) {
+      setLoginError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setIsLoggingIn(false)
+    }
+  }
+
+  if (!authTokenState) {
+    return (
+      <main className="auth-shell">
+        <section className="auth-card">
+          <h1>Login required</h1>
+          <p>You must login to access products and user management.</p>
+          {loginError ? <p className="error">{loginError}</p> : null}
+          <form className="form-grid" onSubmit={handleLogin}>
+            <label>
+              Email
+              <input type="email" value={loginEmail} onChange={(e) => setLoginEmail(e.target.value)} />
+            </label>
+            <label>
+              Password
+              <input type="password" value={loginPassword} onChange={(e) => setLoginPassword(e.target.value)} />
+            </label>
+            <button className="btn-primary" disabled={isLoggingIn} type="submit">
+              {isLoggingIn ? 'Logging in…' : 'Login'}
+            </button>
+          </form>
+        </section>
+      </main>
+    )
   }
 
   return (
@@ -437,7 +648,11 @@ export function App() {
       <header className="header-row">
         <div>
           <h1>Products Manager</h1>
-          <p>Manage products, workflow status, and documentation links.</p>
+          <p>Manage products, workflow status, documentation links, and users.</p>
+        </div>
+        <div className="session-controls">
+          <span className="muted">{currentUserEmail ? `Logged in as ${currentUserEmail}` : 'Authenticated'}</span>
+          <button className="btn-secondary" onClick={() => logout('Logged out.')}>Logout</button>
         </div>
       </header>
 
@@ -450,6 +665,9 @@ export function App() {
         </button>
         <button className={`btn-secondary ${route.kind === 'create' ? 'is-active' : ''}`} onClick={goToCreate}>
           Create / edit page
+        </button>
+        <button className={`btn-secondary ${route.kind === 'users' ? 'is-active' : ''}`} onClick={goToUsers}>
+          Users
         </button>
       </nav>
 
@@ -606,7 +824,65 @@ export function App() {
         />
       ) : null}
 
-      {route.kind === 'product' ? (
+      {route.kind === 'users' ? (
+        <section className="card">
+          <h2>Users management</h2>
+          <p className="muted">List, edit, and delete users.</p>
+          {usersError ? <p className="error">{usersError}</p> : null}
+          <table className="table">
+            <thead>
+              <tr>
+                <th>Email</th>
+                <th>New password (optional)</th>
+                <th>Created</th>
+                <th>Updated</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {users.map((user) => (
+                <tr key={user.id}>
+                  <td>
+                    <input
+                      aria-label={`User email ${user.id}`}
+                      value={userDrafts[user.id]?.email ?? user.email}
+                      onChange={(event) => setUserDraftField(user.id, 'email', event.target.value)}
+                    />
+                  </td>
+                  <td>
+                    <input
+                      aria-label={`User password ${user.id}`}
+                      type="password"
+                      placeholder="Leave empty to keep current password"
+                      value={userDrafts[user.id]?.password ?? ''}
+                      onChange={(event) => setUserDraftField(user.id, 'password', event.target.value)}
+                    />
+                  </td>
+                  <td>{new Date(user.createdAt).toLocaleString()}</td>
+                  <td>{new Date(user.updatedAt).toLocaleString()}</td>
+                  <td className="actions">
+                    <button className="btn-primary" onClick={() => saveUser(user.id)}>
+                      Save
+                    </button>
+                    <button className="btn-danger" onClick={() => removeUser(user.id)}>
+                      Delete
+                    </button>
+                  </td>
+                </tr>
+              ))}
+              {users.length === 0 ? (
+                <tr>
+                  <td colSpan={5} className="muted">
+                    No users found.
+                  </td>
+                </tr>
+              ) : null}
+            </tbody>
+          </table>
+        </section>
+      ) : null}
+
+      {route.kind === 'product' ?
         selectedProduct ? (
           <>
             <ProductForm
@@ -647,7 +923,7 @@ export function App() {
             <p className="muted">Product not found.</p>
           </section>
         )
-      ) : null}
+      : null}
     </main>
   )
 }

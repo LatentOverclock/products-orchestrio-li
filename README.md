@@ -6,6 +6,7 @@ Product management app implemented with the req-trace flow (`github.com/trace-co
 - `requirements/project.v1.md`
 - `requirements/project.v2.md`
 - `requirements/project.v3.md`
+- `requirements/project.v4.md`
 
 ## Stack
 - Frontend: TypeScript + React
@@ -26,9 +27,22 @@ Backend health: `http://localhost:8180/health`
 make test
 ```
 
+## Authentication
+
+Required backend auth env variables:
+- `AUTH_JWT_SECRET`
+- `AUTH_ADMIN_EMAIL`
+- `AUTH_ADMIN_PASSWORD`
+
+At startup, the backend ensures the configured admin user exists.
+
 ## Deploy
 ```bash
 make deploy
 ```
 
-Set `APP_HOST` in `.env` (deployment config boundary).
+Set deployment config in `.env`:
+- `APP_HOST`
+- `AUTH_JWT_SECRET`
+- `AUTH_ADMIN_EMAIL`
+- `AUTH_ADMIN_PASSWORD`

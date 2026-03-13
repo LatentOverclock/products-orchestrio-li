@@ -53,43 +53,99 @@ const detailPayload = {
   },
 }
 
-function mockGraphQL() {
-  vi.stubGlobal(
-    'fetch',
-    vi.fn(async (_url: string, init?: RequestInit) => {
-      const body = JSON.parse(String(init?.body ?? '{}')) as { query?: string }
-      const query = body.query ?? ''
+const usersPayload = {
+  data: {
+    users: [
+      {
+        id: '10',
+        email: 'admin@example.com',
+        createdAt: '2026-03-13T12:00:00Z',
+        updatedAt: '2026-03-13T12:00:00Z',
+      },
+      {
+        id: '11',
+        email: 'editor@example.com',
+        createdAt: '2026-03-13T12:30:00Z',
+        updatedAt: '2026-03-13T12:30:00Z',
+      },
+    ],
+  },
+}
 
-      if (query.includes('query ListProducts')) {
-        return { json: async () => listProductsPayload }
-      }
-      if (query.includes('query ProductById')) {
-        return { json: async () => detailPayload }
-      }
-      if (query.includes('mutation CreateProduct')) {
-        return { json: async () => ({ data: { createProduct: { id: '3' } } }) }
-      }
-      if (query.includes('mutation UpdateProduct')) {
-        return { json: async () => ({ data: { updateProduct: { id: '1' } } }) }
-      }
-      if (query.includes('mutation DeleteProduct')) {
-        return { json: async () => ({ data: { deleteProduct: true } }) }
-      }
+let fetchMock: ReturnType<typeof vi.fn>
 
-      return { json: async () => ({ data: {} }) }
-    }),
-  )
+function installFetchMock() {
+  fetchMock = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+    const urlValue = typeof url === 'string' ? url : url instanceof URL ? url.toString() : url.url
+
+    if (urlValue.endsWith('/login')) {
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ token: 'test-token', user: { email: 'admin@example.com' } }),
+      }
+    }
+
+    const body = JSON.parse(String(init?.body ?? '{}')) as { query?: string }
+    const query = body.query ?? ''
+
+    if (query.includes('query ListProducts')) {
+      return { ok: true, status: 200, json: async () => listProductsPayload }
+    }
+    if (query.includes('query ProductById')) {
+      return { ok: true, status: 200, json: async () => detailPayload }
+    }
+    if (query.includes('query ListUsers')) {
+      return { ok: true, status: 200, json: async () => usersPayload }
+    }
+    if (query.includes('mutation CreateProduct')) {
+      return { ok: true, status: 200, json: async () => ({ data: { createProduct: { id: '3' } } }) }
+    }
+    if (query.includes('mutation UpdateProduct')) {
+      return { ok: true, status: 200, json: async () => ({ data: { updateProduct: { id: '1' } } }) }
+    }
+    if (query.includes('mutation DeleteProduct')) {
+      return { ok: true, status: 200, json: async () => ({ data: { deleteProduct: true } }) }
+    }
+    if (query.includes('mutation UpdateUser')) {
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ data: { updateUser: { id: '10', email: 'updated@example.com' } } }),
+      }
+    }
+    if (query.includes('mutation DeleteUser')) {
+      return { ok: true, status: 200, json: async () => ({ data: { deleteUser: true } }) }
+    }
+
+    return { ok: true, status: 200, json: async () => ({ data: {} }) }
+  })
+
+  vi.stubGlobal('fetch', fetchMock)
 }
 
 describe('requirements coverage', () => {
   beforeEach(() => {
+    localStorage.clear()
+    localStorage.setItem('products-auth-token', 'test-token')
     window.location.hash = '#/table'
-    mockGraphQL()
+    installFetchMock()
   })
 
   afterEach(() => {
     cleanup()
     vi.unstubAllGlobals()
+    localStorage.clear()
+  })
+
+  it('requires login before showing protected app when no token is present', async () => {
+    localStorage.removeItem('products-auth-token')
+    render(<App />)
+
+    expect(screen.getByText('Login required')).toBeTruthy()
+    expect(screen.getByLabelText('Email')).toBeTruthy()
+    expect(screen.getByLabelText('Password')).toBeTruthy()
+    expect(screen.queryByText('Products table')).toBeNull()
   })
 
   it('shows dedicated table-view screen with all product properties except description', async () => {
@@ -163,5 +219,29 @@ describe('requirements coverage', () => {
 
     expect(screen.queryByText('Product details')).toBeNull()
     expect(screen.getByText('Product metadata')).toBeTruthy()
+  })
+
+  it('allows listing, editing, and deleting users', async () => {
+    window.location.hash = '#/users'
+    render(<App />)
+
+    await waitFor(() => expect(screen.getByText('Users management')).toBeTruthy())
+
+    expect(screen.getByLabelText('User email 10')).toBeTruthy()
+    expect(screen.getByLabelText('User email 11')).toBeTruthy()
+
+    fireEvent.change(screen.getByLabelText('User email 10'), { target: { value: 'updated@example.com' } })
+    fireEvent.change(screen.getByLabelText('User password 10'), { target: { value: 'newsecret123' } })
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'Save' })[0])
+    fireEvent.click(screen.getAllByRole('button', { name: 'Delete' })[0])
+
+    await waitFor(() => {
+      const queries = fetchMock.mock.calls
+        .map((call) => String((JSON.parse(String(call[1]?.body ?? '{}')) as { query?: string }).query ?? ''))
+        .join('\n')
+      expect(queries.includes('mutation UpdateUser')).toBe(true)
+      expect(queries.includes('mutation DeleteUser')).toBe(true)
+    })
   })
 })

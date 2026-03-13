@@ -209,6 +209,27 @@ button {
   color: #64748b;
 }
 
+.auth-shell {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+}
+
+.auth-card {
+  width: min(460px, 100%);
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 20px;
+}
+
+.session-controls {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
 @media (max-width: 900px) {
   .form-grid {
     grid-template-columns: 1fr;
