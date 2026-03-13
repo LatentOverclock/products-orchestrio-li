@@ -1,0 +1,4 @@
+[submodule "req-trace"]
+	path = req-trace
+	url = https://github.com/trace-code-org/req-trace.git
+	branch = release/v0.4
