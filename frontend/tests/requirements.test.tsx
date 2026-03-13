@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { App } from '../src/App'
 
 const listProductsPayload = {
@@ -92,16 +92,46 @@ describe('requirements coverage', () => {
     vi.unstubAllGlobals()
   })
 
-  it('shows dedicated table-view screen', async () => {
+  it('shows dedicated table-view screen with all product properties except description', async () => {
     render(<App />)
 
     await waitFor(() => expect(screen.getByText('Products table')).toBeTruthy())
-    expect(screen.getByText('Table view')).toBeTruthy()
-    expect(screen.queryByText('Products by status (kanban)')).toBeNull()
 
-    expect(screen.getByRole('columnheader', { name: 'Name' })).toBeTruthy()
-    expect(screen.getByRole('columnheader', { name: 'Status' })).toBeTruthy()
-    expect(screen.getAllByRole('button', { name: 'MacBook Pro 14' }).length).toBeGreaterThan(0)
+    expect(screen.getByRole('columnheader', { name: /Name/i })).toBeTruthy()
+    expect(screen.getByRole('columnheader', { name: /Purchase link/i })).toBeTruthy()
+    expect(screen.getByRole('columnheader', { name: /Shop link/i })).toBeTruthy()
+    expect(screen.getByRole('columnheader', { name: /Booqable link/i })).toBeTruthy()
+    expect(screen.getByRole('columnheader', { name: /Manual link/i })).toBeTruthy()
+    expect(screen.getByRole('columnheader', { name: /Inspection link/i })).toBeTruthy()
+    expect(screen.getAllByRole('columnheader', { name: /Status/i }).length).toBeGreaterThan(0)
+    expect(screen.queryByRole('columnheader', { name: /Description/i })).toBeNull()
+
+    expect(screen.getByLabelText('Filter name')).toBeTruthy()
+    expect(screen.getByLabelText('Filter purchase link')).toBeTruthy()
+    expect(screen.getByLabelText('Filter shop link')).toBeTruthy()
+    expect(screen.getByLabelText('Filter booqable link')).toBeTruthy()
+    expect(screen.getByLabelText('Filter manual link')).toBeTruthy()
+    expect(screen.getByLabelText('Filter inspection link')).toBeTruthy()
+    expect(screen.getByLabelText('Filter status')).toBeTruthy()
+  })
+
+  it('supports sorting and filtering by table properties', async () => {
+    const { container } = render(<App />)
+
+    await waitFor(() => expect(screen.getByText('Products table')).toBeTruthy())
+
+    fireEvent.change(screen.getByLabelText('Filter status'), { target: { value: 'mafo' } })
+    expect(screen.queryByRole('button', { name: 'ThinkPad X1' })).toBeNull()
+
+    fireEvent.change(screen.getByLabelText('Filter status'), { target: { value: '' } })
+    fireEvent.change(screen.getByLabelText('Filter purchase link'), { target: { value: 'purchase' } })
+    expect(screen.queryByRole('button', { name: 'ThinkPad X1' })).toBeNull()
+
+    fireEvent.change(screen.getByLabelText('Filter purchase link'), { target: { value: '' } })
+
+    fireEvent.click(screen.getByRole('button', { name: /Name/i }))
+    const firstRowNameButton = container.querySelector('tbody tr td .link-button') as HTMLButtonElement | null
+    expect(firstRowNameButton?.textContent).toBe('ThinkPad X1')
   })
 
   it('shows dedicated kanban-view screen', async () => {

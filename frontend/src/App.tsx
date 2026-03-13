@@ -34,11 +34,52 @@ type RouteState =
   | { kind: 'create' }
   | { kind: 'product'; id: string }
 
+type TablePropertyKey =
+  | 'name'
+  | 'purchaseLink'
+  | 'shopLink'
+  | 'booqableLink'
+  | 'manualLink'
+  | 'inspectionLink'
+  | 'status'
+
+type SortDirection = 'asc' | 'desc'
+
 const statuses: Array<{ value: ProductStatus; label: string }> = [
   { value: 'mafo', label: 'mafo' },
   { value: 'write-manual', label: 'write-manual' },
   { value: 'all-done', label: 'all-done' },
 ]
+
+const tablePropertyOrder: TablePropertyKey[] = [
+  'name',
+  'purchaseLink',
+  'shopLink',
+  'booqableLink',
+  'manualLink',
+  'inspectionLink',
+  'status',
+]
+
+const tablePropertyLabels: Record<TablePropertyKey, string> = {
+  name: 'Name',
+  purchaseLink: 'Purchase link',
+  shopLink: 'Shop link',
+  booqableLink: 'Booqable link',
+  manualLink: 'Manual link',
+  inspectionLink: 'Inspection link',
+  status: 'Status',
+}
+
+const initialTableFilters: Record<TablePropertyKey, string> = {
+  name: '',
+  purchaseLink: '',
+  shopLink: '',
+  booqableLink: '',
+  manualLink: '',
+  inspectionLink: '',
+  status: '',
+}
 
 const emptyInput: ProductInput = {
   name: '',
@@ -115,6 +156,16 @@ function parseRoute(hash: string): RouteState {
   }
 
   return { kind: 'table' }
+}
+
+function productTableValue(product: Product, key: TablePropertyKey): string {
+  if (key === 'name') return product.name
+  if (key === 'purchaseLink') return product.purchaseLink ?? ''
+  if (key === 'shopLink') return product.shopLink ?? ''
+  if (key === 'booqableLink') return product.booqableLink ?? ''
+  if (key === 'manualLink') return product.manualLink ?? ''
+  if (key === 'inspectionLink') return product.inspectionLink ?? ''
+  return product.status
 }
 
 function toGraphQLInput(input: ProductInput) {
@@ -223,6 +274,18 @@ function renderLink(label: string, href?: string | null) {
   )
 }
 
+function renderTableLink(href?: string | null) {
+  if (!href) {
+    return <span className="muted">—</span>
+  }
+
+  return (
+    <a className="table-link" href={href} target="_blank" rel="noreferrer">
+      {href}
+    </a>
+  )
+}
+
 export function App() {
   const [route, setRoute] = useState<RouteState>(() => parseRoute(window.location.hash))
   const [products, setProducts] = useState<Product[]>([])
@@ -230,6 +293,9 @@ export function App() {
   const [createInput, setCreateInput] = useState<ProductInput>(emptyInput)
   const [editInput, setEditInput] = useState<ProductInput>(emptyInput)
   const [error, setError] = useState('')
+  const [tableFilters, setTableFilters] = useState<Record<TablePropertyKey, string>>(initialTableFilters)
+  const [tableSortKey, setTableSortKey] = useState<TablePropertyKey>('name')
+  const [tableSortDirection, setTableSortDirection] = useState<SortDirection>('asc')
 
   const selectedId = route.kind === 'product' ? route.id : null
 
@@ -289,6 +355,28 @@ export function App() {
     return grouped
   }, [products])
 
+  const filteredAndSortedProducts = useMemo(() => {
+    const filtered = products.filter((product) => {
+      return tablePropertyOrder.every((key) => {
+        const filterValue = tableFilters[key].trim().toLowerCase()
+        if (!filterValue) {
+          return true
+        }
+        const sourceValue = productTableValue(product, key).toLowerCase()
+        return sourceValue.includes(filterValue)
+      })
+    })
+
+    const sorted = [...filtered].sort((a, b) => {
+      const aValue = productTableValue(a, tableSortKey).toLowerCase()
+      const bValue = productTableValue(b, tableSortKey).toLowerCase()
+      const comparison = aValue.localeCompare(bValue, undefined, { numeric: true, sensitivity: 'base' })
+      return tableSortDirection === 'asc' ? comparison : -comparison
+    })
+
+    return sorted
+  }, [products, tableFilters, tableSortDirection, tableSortKey])
+
   const navigate = (hash: string) => {
     if (window.location.hash === hash) {
       setRoute(parseRoute(hash))
@@ -301,6 +389,27 @@ export function App() {
   const goToKanban = () => navigate('#/kanban')
   const goToCreate = () => navigate('#/products/new')
   const goToProduct = (id: string) => navigate(`#/products/${id}`)
+
+  const setTableFilter = (key: TablePropertyKey, value: string) => {
+    setTableFilters((current) => ({ ...current, [key]: value }))
+  }
+
+  const toggleTableSort = (key: TablePropertyKey) => {
+    if (tableSortKey === key) {
+      setTableSortDirection((current) => (current === 'asc' ? 'desc' : 'asc'))
+      return
+    }
+
+    setTableSortKey(key)
+    setTableSortDirection('asc')
+  }
+
+  const tableSortIndicator = (key: TablePropertyKey) => {
+    if (tableSortKey !== key) {
+      return '↕'
+    }
+    return tableSortDirection === 'asc' ? '↑' : '↓'
+  }
 
   const createProduct = async () => {
     try {
@@ -369,22 +478,96 @@ export function App() {
           <table className="table">
             <thead>
               <tr>
-                <th>Name</th>
-                <th>Status</th>
-                <th>Description</th>
+                {tablePropertyOrder.map((key) => (
+                  <th key={key}>
+                    <button className="header-sort" onClick={() => toggleTableSort(key)}>
+                      <span>{tablePropertyLabels[key]}</span>
+                      <span className="header-sort-indicator">{tableSortIndicator(key)}</span>
+                    </button>
+                  </th>
+                ))}
                 <th>Actions</th>
+              </tr>
+              <tr className="filter-row">
+                <th>
+                  <input
+                    aria-label="Filter name"
+                    placeholder="Filter name"
+                    value={tableFilters.name}
+                    onChange={(event) => setTableFilter('name', event.target.value)}
+                  />
+                </th>
+                <th>
+                  <input
+                    aria-label="Filter purchase link"
+                    placeholder="Filter purchase link"
+                    value={tableFilters.purchaseLink}
+                    onChange={(event) => setTableFilter('purchaseLink', event.target.value)}
+                  />
+                </th>
+                <th>
+                  <input
+                    aria-label="Filter shop link"
+                    placeholder="Filter shop link"
+                    value={tableFilters.shopLink}
+                    onChange={(event) => setTableFilter('shopLink', event.target.value)}
+                  />
+                </th>
+                <th>
+                  <input
+                    aria-label="Filter booqable link"
+                    placeholder="Filter booqable link"
+                    value={tableFilters.booqableLink}
+                    onChange={(event) => setTableFilter('booqableLink', event.target.value)}
+                  />
+                </th>
+                <th>
+                  <input
+                    aria-label="Filter manual link"
+                    placeholder="Filter manual link"
+                    value={tableFilters.manualLink}
+                    onChange={(event) => setTableFilter('manualLink', event.target.value)}
+                  />
+                </th>
+                <th>
+                  <input
+                    aria-label="Filter inspection link"
+                    placeholder="Filter inspection link"
+                    value={tableFilters.inspectionLink}
+                    onChange={(event) => setTableFilter('inspectionLink', event.target.value)}
+                  />
+                </th>
+                <th>
+                  <select
+                    aria-label="Filter status"
+                    value={tableFilters.status}
+                    onChange={(event) => setTableFilter('status', event.target.value)}
+                  >
+                    <option value="">All statuses</option>
+                    {statuses.map((status) => (
+                      <option key={status.value} value={status.value}>
+                        {status.label}
+                      </option>
+                    ))}
+                  </select>
+                </th>
+                <th></th>
               </tr>
             </thead>
             <tbody>
-              {products.map((product) => (
+              {filteredAndSortedProducts.map((product) => (
                 <tr key={product.id}>
                   <td>
                     <button className="link-button" onClick={() => goToProduct(product.id)}>
                       {product.name}
                     </button>
                   </td>
+                  <td>{renderTableLink(product.purchaseLink)}</td>
+                  <td>{renderTableLink(product.shopLink)}</td>
+                  <td>{renderTableLink(product.booqableLink)}</td>
+                  <td>{renderTableLink(product.manualLink)}</td>
+                  <td>{renderTableLink(product.inspectionLink)}</td>
                   <td>{product.status}</td>
-                  <td>{product.description || '—'}</td>
                   <td className="actions">
                     <button className="btn-secondary" onClick={() => goToProduct(product.id)}>
                       Open
@@ -395,10 +578,10 @@ export function App() {
                   </td>
                 </tr>
               ))}
-              {products.length === 0 ? (
+              {filteredAndSortedProducts.length === 0 ? (
                 <tr>
-                  <td colSpan={4} className="muted">
-                    No products yet.
+                  <td colSpan={8} className="muted">
+                    No products matching current filters.
                   </td>
                 </tr>
               ) : null}

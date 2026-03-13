@@ -4,6 +4,7 @@ Product management app implemented with the req-trace flow (`github.com/trace-co
 
 ## Requirements source
 - `requirements/project.v1.md`
+- `requirements/project.v2.md`
 
 ## Stack
 - Frontend: TypeScript + React
