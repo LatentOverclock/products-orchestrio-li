@@ -4,7 +4,7 @@ services:
     labels:
       - "traefik.enable=true"
       - "traefik.docker.network=edge-proxy"
-      - "traefik.http.routers.products-api.rule=(Host(`${APP_HOST}`) || Host(`products.orchestio.li`)) && (PathPrefix(`/graphql`) || PathPrefix(`/health`))"
+      - "traefik.http.routers.products-api.rule=Host(`${APP_HOST}`) && (PathPrefix(`/graphql`) || PathPrefix(`/health`))"
       - "traefik.http.routers.products-api.entrypoints=websecure"
       - "traefik.http.routers.products-api.priority=200"
       - "traefik.http.routers.products-api.tls.certresolver=letsencrypt"
@@ -18,7 +18,7 @@ services:
     labels:
       - "traefik.enable=true"
       - "traefik.docker.network=edge-proxy"
-      - "traefik.http.routers.products-web.rule=Host(`${APP_HOST}`) || Host(`products.orchestio.li`)"
+      - "traefik.http.routers.products-web.rule=Host(`${APP_HOST}`)"
       - "traefik.http.routers.products-web.entrypoints=websecure"
       - "traefik.http.routers.products-web.priority=100"
       - "traefik.http.routers.products-web.tls.certresolver=letsencrypt"
